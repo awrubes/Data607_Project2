@@ -1,0 +1,141 @@
+---
+title: "Project2_WorldIndicators"
+author: "aw"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Overview
+
+For this analysis, I cleaned and analyzed a messy "untidy" data set from the World Bank. The data set includes a vast array of data in various hard to analyze formats. For the sake of this analysis, we'll focus our efforts on cleaning and prepping the data and then analyzing the trends in urban population growth across different countries using world development indicators from 2014 to 2023.
+
+The dataset utilized for this project contains various economic and social indicators for multiple countries. However, for this analysis, we will concentrate on the urban population growth indicator (`SP.URB.GROW`), which tracks the annual growth rate of urban populations as a percentage.
+
+```{r libs}
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(stringr)
+```
+
+## Importing and Cleaning the Data
+
+First, we'll need to import the data set.
+
+```{r import}
+
+world_df <- read_csv("https://raw.githubusercontent.com/awrubes/Data607_Project2/main/worldindicators.csv")
+
+head(world_df)
+
+```
+
+As you can see, before being able to perform any analysis, the data requires significant cleaning and preparation to ensure accuracy and usability. The key steps in the data cleaning process are outlined below:
+
+1.  **Redundant Column Removal:**\
+    The `Country Code` column was removed as it was redundant for the analysis. The `Country Name` column sufficiently identified each country.
+
+2.  **Missing Data:**\
+    Rows that contained missing values across all columns were filtered out.
+
+3.  **Removal of Non-Data Rows:**\
+    The data set contained two non-data rows at the end, which were removed.
+
+4.  **Pivoting the Data:**\
+    The data set, which was originally in wide format with each year represented as a separate column, was transformed into long format using the `pivot_longer()` function. This step made it easier to work with time-series data and perform calculations.
+
+5.  **Filtering and Reformatting:**\
+    Some entries contained placeholder values like "..." which were filtered out. Additionally, the year values were reformatted to only include the four-digit year, simplifying further analysis.
+
+6.  **Focus on Urban Growth:**\
+    I filtered the data set to focus exclusively on the urban growth rate indicator (`SP.URB.GROW`). This allowed for a targeted analysis of urban population growth trends.
+
+```{r cleaning}
+
+#get rid of country code, is redundant
+world_df_col <- world_df %>%
+    select(-`Country Code`)
+
+#remove rows missing values
+world_df_missing <- world_df_col %>%
+  filter(!if_all(everything(), is.na))
+
+#remove last two rows
+world_df_last <- world_df_missing[-((nrow(world_df_missing)-1):nrow(world_df_missing)), ]
+
+#pivot longer
+world_df_pivot <- world_df_last %>%
+  pivot_longer(
+    cols = `2014 [YR2014]`:`2023 [YR2023]`,
+    names_to="Year",
+    values_to="Indicator"
+  )
+
+#filter out "..." values and reformat the years
+world_df_filter <- world_df_pivot %>%
+  filter(!grepl("\\.\\.", Indicator))%>%
+  mutate(
+    Year = sub("^([0-9]{4}).*", "\\1", Year)
+  )
+
+#look at urban growth, filter out unneeded columns
+world_df_urban <- world_df_filter %>%
+  filter(grepl("^SP\\.URB\\.GROW$", `Series Code`))
+
+head(world_df_urban)
+
+```
+
+After making these necessary steps to prep and clean the data for analysis, we can look more closely at the urban growth rates by country. I though it would be interesting to calculate the average growth rate for each country and compare the top 5 and bottom 5 countries to see how drastically different those averages might be.
+
+```{r calculate}
+
+# calculate average growth rate by country making sure columns are correct type
+world_df_num <- world_df_urban %>%
+  mutate(Indicator_Numeric = as.numeric(Indicator))%>%
+  select(-Indicator)%>%
+  mutate(`Country Name` = trimws(`Country Name`))
+
+avg_growth_by_country <- world_df_num %>%
+  group_by(`Country Name`) %>%
+  summarize(Average_Growth = base::mean(Indicator_Numeric, na.rm=TRUE))%>%
+  arrange(desc(Average_Growth))
+
+head(avg_growth_by_country)
+
+# Extract top 5 countries
+top_5_countries <- avg_growth_by_country %>%
+  arrange(desc(Average_Growth)) %>%
+  slice_head(n = 5)
+
+# Extract bottom 5 countries
+bottom_5_countries <- avg_growth_by_country %>%
+  arrange(Average_Growth) %>%
+  slice_head(n = 5)
+
+```
+
+## Visualization and Analysis
+
+The analysis revealed significant variation in urban growth rates across countries, with some nations experiencing rapid urbanization while others exhibiting much slower growth.
+
+The top five countries with the highest average urban growth rates and the bottom five countries with the lowest rates are highlighted below. These countries represent the extremes in urbanization trends and provide interesting insight into the global patterns of urban population shifts.
+
+```{r chart}
+
+
+# Combine for easy plotting
+top_bottom_countries <- bind_rows(top_5_countries, bottom_5_countries)
+
+ggplot(top_bottom_countries, aes(x = reorder(`Country Name`, Average_Growth), y = Average_Growth, fill = Average_Growth > 1)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +  # Flip coordinates 
+  labs(x = "Country", y = "Average Urban Growth Rate (Annual %)", title = "Top 5 and Bottom 5 Countries by Urban Growth Rate") +
+  theme_minimal() +
+  scale_fill_manual(values = c("red", "green"), guide = "none")  
+  
+```
